@@ -1,0 +1,122 @@
+# Elite AI Resume Builder & Job Tracker - Low Level Design (LLD)
+
+This document outlines the architecture, tech stack, and module flows for the cross-platform application that parses CVs, scrapes global jobs, provides job market statistics, and generates ATS-friendly resumes.
+
+## 1. Proposed Technology Stack (Highly Optimized)
+
+To ensure the system is performant, scalable, and cost-effective using open-source tools, we have optimized the stack:
+
+*   **Mobile Frontend (iOS & Android)**: **React Native (Expo)**
+*   **Backend Framework**: **Python (FastAPI)**
+*   **Primary Database**: **PostgreSQL** (with **pgvector** extension)
+*   **Message Broker & Task Queue**: **RabbitMQ** (or Apache Kafka) + Celery
+*   **Caching & Rate Limiting**: **Redis**
+*   **AI/LLM Engine**: **Local OSS LLM (Llama 3 / Mistral via Ollama + vLLM)**
+*   **Document Storage & Delivery**: **MinIO + Local File System**
+*   **Web Scraping Engine**: **Playwright + Scrapy**
+
+---
+
+## 2. Optimized System Architecture
+
+```mermaid
+graph TD
+  subgraph Client
+    RN[React Native App]
+    CDN[Content Delivery Network\n Cache Static PDFs]
+  end
+
+  subgraph API Gateway
+    FastAPI[FastAPI Server\n Async WebSockets/REST]
+  end
+
+  subgraph Async Event Bus
+    Rabbit[RabbitMQ / Kafka\n Message Broker]
+  end
+
+  subgraph Microservices & Workers
+    UserSvc[User & Profile Service]
+    ScraperWorker[Scrapy / Playwright\n Job Scraper Cluster]
+    AIWorker[vLLM + Ollama\n AI Inference Engine]
+    StatsAggregator[Stats Aggregation Worker]
+  end
+
+  subgraph Data Layer
+    PG[(PostgreSQL\n Relational Data)]
+    VectorDB[(ChromaDB / pgvector\n Semantic Embeddings)]
+    Redis[(Redis\n High-Speed Cache)]
+    MinIO[MinIO Object Storage\n Resumes & PDFs]
+  end
+
+  RN <-->|HTTPS| FastAPI
+  RN -->|Download Resume| CDN
+  CDN --> MinIO
+  
+  FastAPI --> UserSvc
+  FastAPI --> Redis
+  FastAPI --> Rabbit
+  
+  UserSvc --> PG
+  UserSvc --> MinIO
+  
+  Rabbit --> ScraperWorker
+  Rabbit --> AIWorker
+  Rabbit --> StatsAggregator
+  
+  ScraperWorker -->|Raw Jobs| VectorDB
+  ScraperWorker -->|Metrics| StatsAggregator
+  
+  StatsAggregator --> PG
+  StatsAggregator -->|Update Cache| Redis
+  
+  AIWorker --> VectorDB
+  AIWorker --> MinIO
+```
+
+---
+
+## 3. Highly Performant Data Flows
+
+### 3.1. Edge-Cached Resume Storage
+*   Uploading a CV streams directly via FastAPI to **MinIO** in chunks, preventing RAM exhaustion on the server.
+*   When a user downloads their generated ATS resume, it is served via a lightweight CDN (or NGINX reverse proxy caching) sitting in front of MinIO.
+
+### 3.2. Vector/RAG AI Pipeline
+*   **One-Time Process**: When the CV is uploaded, we summarize the skills and embed them into vectors stored in **ChromaDB/pgvector**.
+*   **Fast Matching**: When a new Job Description is clicked, we instantly do a vector-math comparison to find which parts of the user's history match the JD, and *only send the matching context* to the LLM.
+
+### 3.3. Event-Driven Web Scraping
+*   The backend instantly queues the job in **RabbitMQ**.
+*   A fleet of Python **Scrapy Workers** picks up the tasks in parallel. 
+*   When finished, the worker populates the PostgreSQL database, updates the **Redis cache**, and sends a **WebSocket** notification back to the mobile app saying "Your market stats are ready!".
+
+---
+
+## 4. Hardware & Performance Evaluation
+
+A critical distinction in this architecture is the **Client-Server Model**. The heavy lifting (AI, Web Scraping, Databases) will **NOT** run on the user's phone or tablet. Those components will run on a Centralized Backend Server (a self-hosted Windows/Linux PC or Cloud Server).
+
+Here is the breakdown of hardware consumption:
+
+### 4.1. The Client App (Phones & Tablets: Android / iOS)
+The React Native app acts merely as a "Thin Client". It only renders the UI and makes HTTP requests to your Backend Server over the internet.
+*   **CPU Consumption:** Very Low (Minimal processing, mostly UI rendering).
+*   **Memory (RAM) Needed:** ~150MB - 300MB (Standard for modern mobile apps).
+*   **Storage Space:** ~50MB for the application binary itself.
+*   **Battery Drain:** Very Low (No heavy continuous processing; background execution is not required as pushing is handled by WebSockets).
+
+### 4.2. The Backend Server Environment (Windows / Linux Desktop)
+This is where the Open Source LLM (Ollama), Databases, and Scrapers physically run. You will host this on a solid desktop PC, laptop, or cloud server.
+*   **CPU Requirements:** High. Minimum 8-Core CPU (e.g., AMD Ryzen 7 / Intel Core i7) for handling concurrent API traffic and Web Scraper headless browsers.
+*   **Memory (RAM) Needed:** 
+    *   **16GB RAM minimum** (If running smaller LLMs like Llama 3 8B quantized).
+    *   **32GB+ RAM recommended** for faster inference + supporting the Vector DB + Scrapy workers simultaneously.
+*   **Storage Space:** ~100GB Fast NVMe SSD.
+    *   *Ollama Models:* ~5GB per model.
+    *   *MinIO / PDFs:* Scalable based on users.
+    *   *PostgreSQL/VectorDB:* ~10-20GB initial allocation.
+*   **GPU (Optional but Highly Recommended):** An Nvidia RTX 3060/4060 (8GB-12GB VRAM) or better will exponentially speed up the AI Resume Generation compared to running entirely on the CPU.
+
+### Summary
+*   Users on **Android and iOS** will experience a lightning-fast, lightweight app that consumes virtually no resources.
+*   The **Windows/Linux Server** that *you* run will do all the heavy lifting and requires a modern processor with at least 16GB of RAM to comfortably manage the Open Source AI and Web Scraper pipeline.
